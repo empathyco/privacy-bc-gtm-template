@@ -1,0 +1,5 @@
+homepage: "https://www.visibleprivacy.com/"
+documentation: "https://www.visibleprivacy.com/beautiful-consent"
+versions:
+  - sha: bddce5225b105236770d6da72f11f82acfdcf8d8
+    changeNotes: Initial Version
