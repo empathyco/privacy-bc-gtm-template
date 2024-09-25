@@ -5,7 +5,7 @@ Beautiful Consent is a Consent Management Platform (CMP) created by Visible Priv
 
 ## How to Use
 
-With our template, you can install Beautiful Consent using Google Tag Manager.
+With our template, you can install Beautiful Consent (BC) using Google Tag Manager.
 
 1. First, register at [Beautiful Consent Registration](https://www.visibleprivacy.com/beautiful-consent/register).
 2. After registering, you will receive a voucher code via email. 
