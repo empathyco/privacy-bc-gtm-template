@@ -3,10 +3,13 @@ documentation: "https://www.visibleprivacy.com/beautiful-consent"
 versions:
 
     #lastest version
+  - sha: 605069bffe5edd4fbe0f6cd058fff31f27aed6e4
+    changeNotes: update License
+    
+    #previous versions
   - sha: f62df3fe68ad870de16c1a5e95945091fda16c44
     changeNotes: v1 version completed
   
-    #previous versions
   - sha: 9217e414c385db448394d1e93c80f0a33b40f2fb
     changeNotes: v1 version
 
