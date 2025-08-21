@@ -1,12 +1,4 @@
-___TERMS_OF_SERVICE___
-
-By creating or modifying this file you agree to Google Tag Manager's Community
-Template Gallery Developer Terms of Service available at
-https://developers.google.com/tag-manager/gallery-tos (or such other URL as
-Google may provide), as modified from time to time.
-
-
-___INFO___
+﻿___INFO___
 
 {
   "type": "TAG",
@@ -47,68 +39,125 @@ const gtagSet = require('gtagSet');
 const setDefaultConsentState = require('setDefaultConsentState');
 const getCookieValues = require('getCookieValues');
 const updateConsentState = require("updateConsentState");
+const copyFromWindow = require('copyFromWindow');
+const createQueue = require('createQueue');
+const callInWindow = require('callInWindow');
 
 const id = data.id;
 
+const uetConsent = (mode, state) =>
+  createQueue('uetq')('consent', mode, { 'ad_storage': state });
+
+const dataLayerPush = createQueue('dataLayer');
+
+/**
+ * 1) Set GA helpers
+ *    - developer_id + url_passthrough should be set before any config
+ *    - start with ads_data_redaction = true (will relax after consent read)
+ */
 gtagSet({
   'developer_id.dMzZjND': true,
   'url_passthrough': true,
-  'ads_data_redaction': true,
 });
 
-setDefaultConsentState({
-  ad_storage: 'denied',
-  ad_user_data: 'denied',
-  ad_personalization: 'denied',
-  analytics_storage: 'denied',
-  functionality_storage: 'denied',
-  personalization_storage: 'denied',
-  security_storage: 'granted',
-  'wait_for_update': 500
-});
-
+/**
+ * 2) Deny-by-default + wait window
+ *    Use a slightly safer wait window to cover first config/page_view on slower pages.
+ */
 const consentPurpose = getCookieValues("BCPurpose").toString();
+let waitForUpdate = 1000;
+
+if(consentPurpose && consentPurpose !== '') {
+  // compute wait_for_update with a lower value so GA4 does not pause unnecesarily
+  waitForUpdate = 500;
+} else { 
+  // Ads Data Redaction true by default if no consent was given in a previous session
+  gtagSet({
+  'ads_data_redaction': true,
+  });
+  
+  // Meta Ads denied by default if no consent was given in a previous session
+  if (copyFromWindow('fbq')) {
+    callInWindow('fbq', 'revoke');
+  }
+  
+  // Microsoft Advertising UET denied by default if no consent was given in a previous session
+  uetConsent('default', 'denied');
+}
+  
+setDefaultConsentState({
+  'ad_storage': 'denied',
+  'ad_user_data': 'denied',
+  'ad_personalization': 'denied',
+  'analytics_storage': 'denied',
+  'functionality_storage': 'denied',
+  'personalization_storage': 'denied',
+  'security_storage': 'granted',
+  'wait_for_update': waitForUpdate
+});
+
+/**
+ * 3) Read existing consent from BCPurpose
+ *    Expected bit order: [preferences, analytics, marketing]
+ *    If your writer changes order, update the mapping below accordingly.
+ */
 if(consentPurpose && consentPurpose !== '') {
   let preferencePurpose = consentPurpose.charAt(0) === '1' ? 'granted' : 'denied';
   let analyticsPurpose = consentPurpose.charAt(1) === '1' ? 'granted' : 'denied';
   let marketingPurpose = consentPurpose.charAt(2) === '1' ? 'granted' : 'denied';
+  
   updateConsentState({
-    ad_storage: marketingPurpose,
-    ad_user_data: marketingPurpose,
-    ad_personalization: marketingPurpose,
-    analytics_storage: analyticsPurpose,
-    functionality_storage: preferencePurpose,
-    personalization_storage: preferencePurpose,
-    security_storage: 'granted'
+    'ad_storage': marketingPurpose,
+    'ad_user_data': marketingPurpose,
+    'ad_personalization': marketingPurpose,
+    'analytics_storage': analyticsPurpose,
+    'functionality_storage': preferencePurpose,
+    'personalization_storage': preferencePurpose,
+    'security_storage': 'granted'
   });
+  
+  gtagSet({
+    'ads_data_redaction': marketingPurpose === 'granted' ? false : true
+  });
+  
+  if (copyFromWindow('fbq')) {
+    callInWindow('fbq', 'consent', marketingPurpose === 'granted' ? 'grant' : 'revoke');
+  }
+  
+  uetConsent('update', marketingPurpose);
+  
+  dataLayerPush('vp_gtm_consent_update');
 }
 
+/** 4) Load auxiliary scripts with a latch so we call success/failure ONCE */
 const blackList = 'https://bc-prod-config.empathy.co/'+id+'/cookieBlacklist.js';
-if (queryPermission('inject_script', blackList)) {
-  injectScript(blackList, data.gtmOnSuccess, data.gtmOnFailure);
-} else {
-  data.gtmOnFailure();
-}
 const blockList = 'https://bc-prod-config.empathy.co/blockCookiesScript.js';
-if (queryPermission('inject_script', blockList)) {
-  injectScript(blockList, data.gtmOnSuccess, data.gtmOnFailure);
-} else {
-  data.gtmOnFailure();
-}
 const customization = 'https://bc-prod-config.empathy.co/'+id+'/customization.js';
-if (queryPermission('inject_script', customization)) {
-  injectScript(customization, data.gtmOnSuccess, data.gtmOnFailure);
-} else {
-  data.gtmOnFailure();
-}
 const service = 'https://bc-prod-config.empathy.co/assets/index.js';
-if (queryPermission('inject_script', service)) {
-  injectScript(service, data.gtmOnSuccess, data.gtmOnFailure);
-} else {
-  data.gtmOnFailure();
+
+function noop() {}
+
+let done = false;
+function finish(ok) {
+  if (done) return;
+  done = true;
+  ok ? data.gtmOnSuccess() : data.gtmOnFailure();
 }
 
-data.gtmOnSuccess();
+function tryInject(url) {
+  if (queryPermission('inject_script', url)) {
+    injectScript(url, noop, noop);
+    return true;
+  }
+  return false;
+}
+
+// Inject aux scripts only if permitted; finish once.
+const ok1 = tryInject(blackList);
+const ok2 = tryInject(blockList);
+const ok3 = tryInject(customization);
+const ok4 = tryInject(service);
+finish(ok1 && ok2 && ok3 && ok4);
 
 
 ___WEB_PERMISSIONS___
@@ -482,6 +531,145 @@ ___WEB_PERMISSIONS___
               {
                 "type": 1,
                 "string": "BCPurpose"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "clientAnnotations": {
+      "isEditedByUser": true
+    },
+    "isRequired": true
+  },
+  {
+    "instance": {
+      "key": {
+        "publicId": "access_globals",
+        "versionId": "1"
+      },
+      "param": [
+        {
+          "key": "keys",
+          "value": {
+            "type": 2,
+            "listItem": [
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "key"
+                  },
+                  {
+                    "type": 1,
+                    "string": "read"
+                  },
+                  {
+                    "type": 1,
+                    "string": "write"
+                  },
+                  {
+                    "type": 1,
+                    "string": "execute"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "fbq"
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": false
+                  }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "key"
+                  },
+                  {
+                    "type": 1,
+                    "string": "read"
+                  },
+                  {
+                    "type": 1,
+                    "string": "write"
+                  },
+                  {
+                    "type": 1,
+                    "string": "execute"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "uetq"
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": false
+                  }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "key"
+                  },
+                  {
+                    "type": 1,
+                    "string": "read"
+                  },
+                  {
+                    "type": 1,
+                    "string": "write"
+                  },
+                  {
+                    "type": 1,
+                    "string": "execute"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "dataLayer"
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": false
+                  }
+                ]
               }
             ]
           }
